@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MIDI 自动弹奏器</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>MIDI 自动弹奏器</h1>
+      <p class="hint">上传 .mid/.midi 文件后自动解析，支持多轨道、多通道、速度变化、鼓轨等常见 MIDI 模式。</p>
+
+      <section class="panel">
+        <label for="midiFile" class="label">选择 MIDI 文件</label>
+        <input id="midiFile" type="file" accept=".mid,.midi,audio/midi,audio/x-midi" />
+        <p id="fileInfo" class="meta">尚未加载文件</p>
+      </section>
+
+      <section class="panel controls">
+        <button id="playBtn" disabled>播放</button>
+        <button id="pauseBtn" disabled>暂停</button>
+        <button id="stopBtn" disabled>停止</button>
+        <label class="inline">
+          速度
+          <input id="tempoControl" type="range" min="0.5" max="2" step="0.05" value="1" />
+          <span id="tempoValue">1.00x</span>
+        </label>
+      </section>
+
+      <section class="panel">
+        <label for="seekBar" class="label">进度</label>
+        <input id="seekBar" type="range" min="0" max="1" step="0.001" value="0" disabled />
+        <p id="timeInfo" class="meta">00:00 / 00:00</p>
+      </section>
+
+      <section class="panel">
+        <h2>轨道</h2>
+        <div id="trackList" class="track-list">加载文件后显示轨道信息</div>
+      </section>
+    </main>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "vibe-coding",
+  "version": "1.0.0",
+  "description": "Browser MIDI autoplay project",
+  "main": "index.html",
+  "scripts": {
+    "start": "python3 -m http.server 8080",
+    "test": "echo \"No tests configured\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
