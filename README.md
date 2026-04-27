@@ -13,19 +13,13 @@
 
 ## 运行方式
 
-1. 安装依赖（仅用于项目脚手架）
-
-```bash
-npm install
-```
-
-2. 启动静态服务
+1. 启动静态服务
 
 ```bash
 python3 -m http.server 8080
 ```
 
-3. 浏览器打开：
+2. 浏览器打开：
 
 ```text
 http://localhost:8080

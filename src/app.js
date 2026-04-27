@@ -11,6 +11,7 @@ const timeInfo = document.getElementById("timeInfo");
 const trackList = document.getElementById("trackList");
 const tempoControl = document.getElementById("tempoControl");
 const tempoValue = document.getElementById("tempoValue");
+const SCHEDULE_START_DELAY_SECONDS = 0.05;
 
 const state = {
   midi: null,
@@ -159,10 +160,8 @@ function preparePlayback(midi) {
     .filter((track) => track.notes.length > 0)
     .map((track) => {
       const { synth, isDrum } = createInstrument(track);
+      const item = { track, synth, part: null, enabled: true };
       const part = new Tone.Part((time, note) => {
-        if (!item.enabled) {
-          return;
-        }
         if (isDrum) {
           const drumFreq = Tone.Frequency(note.midi, "midi").toFrequency();
           synth.triggerAttackRelease(drumFreq, Math.max(note.duration, 0.06), time, note.velocity);
@@ -172,7 +171,7 @@ function preparePlayback(midi) {
       }, track.notes.map((note) => [note.time, note]));
 
       part.start(0);
-      const item = { track, synth, part, enabled: true };
+      item.part = part;
       return item;
     });
 
@@ -190,7 +189,7 @@ async function startPlayback(fromSeconds = Tone.Transport.seconds) {
 
   await Tone.start();
   Tone.Transport.seconds = Math.max(0, Math.min(fromSeconds, state.midi.duration || 0));
-  Tone.Transport.start("+0.05", Tone.Transport.seconds);
+  Tone.Transport.start(`+${SCHEDULE_START_DELAY_SECONDS}`, Tone.Transport.seconds);
   state.isPlaying = true;
   cancelAnimationFrame(state.rafId);
   state.rafId = requestAnimationFrame(updateTimeline);
@@ -211,8 +210,9 @@ midiFileInput.addEventListener("change", async (event) => {
   } catch (error) {
     clearPlaybackGraph();
     setControlsEnabled(false);
-    trackList.textContent = "解析失败，请检查文件是否为标准 MIDI";
-    fileInfo.textContent = `加载失败: ${error instanceof Error ? error.message : "未知错误"}`;
+    const errorMessage = error instanceof Error ? error.message : "未知错误";
+    trackList.textContent = `解析失败：${errorMessage}，请检查文件是否为标准 MIDI`;
+    fileInfo.textContent = `加载失败: ${errorMessage}`;
   }
 });
 
