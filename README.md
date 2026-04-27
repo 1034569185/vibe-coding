@@ -4,7 +4,7 @@
 
 ## 目录说明
 
-- `/home/runner/work/vibe-coding/vibe-coding/index.html`：主页面（包含样式与脚本）
+- `index.html`：主页面（包含样式与脚本）
 
 ## 快速开始（推荐）
 
@@ -13,7 +13,7 @@
 ### 方式 1：Python（最简单）
 
 ```bash
-cd /home/runner/work/vibe-coding/vibe-coding
+cd <project-directory>
 python3 -m http.server 5500
 ```
 
@@ -24,7 +24,7 @@ python3 -m http.server 5500
 ### 方式 2：Node.js（可选）
 
 ```bash
-npx serve /home/runner/work/vibe-coding/vibe-coding -l 5500
+npx serve . -l 5500
 ```
 
 然后访问：
@@ -53,8 +53,7 @@ npx serve /home/runner/work/vibe-coding/vibe-coding -l 5500
 - 终端里启动服务后是否有 `Serving HTTP on ...` 提示
 - 地址是否写成了 `http://localhost:5500/index.html`
 - 5500 端口是否被占用（可换成 8000 再试）
-- 是否在正确目录启动服务：
-  `/home/runner/work/vibe-coding/vibe-coding`
+- 是否在项目根目录（包含 `index.html` 的目录）启动服务
 
 ### 2) 选择文件后“没反应”
 
