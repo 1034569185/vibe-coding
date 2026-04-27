@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MIDI 上传检测</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        margin: 0;
+        padding: 24px;
+        line-height: 1.5;
+      }
+      .card {
+        max-width: 760px;
+        margin: 0 auto;
+        border: 1px solid #8884;
+        border-radius: 12px;
+        padding: 20px;
+      }
+      h1 {
+        margin-top: 0;
+      }
+      .controls {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      button, input[type="file"] {
+        font: inherit;
+      }
+      #status {
+        margin-top: 14px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: #8882;
+      }
+      #status.ok {
+        background: #2ea04322;
+      }
+      #status.err {
+        background: #f8514922;
+      }
+      pre {
+        margin-top: 14px;
+        padding: 12px;
+        border-radius: 8px;
+        background: #8882;
+        overflow: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>MIDI 上传检测</h1>
+      <p>请选择 <code>.mid</code> 或 <code>.midi</code> 文件，页面会立即显示读取结果与基础头信息。</p>
+      <div class="controls">
+        <input id="midiFile" type="file" accept=".mid,.midi,audio/midi,audio/x-midi" />
+        <button id="clearBtn" type="button">清空</button>
+      </div>
+      <div id="status" aria-live="polite">等待选择文件...</div>
+      <pre id="output">暂无结果</pre>
+    </main>
+
+    <script>
+      const input = document.getElementById("midiFile");
+      const clearBtn = document.getElementById("clearBtn");
+      const status = document.getElementById("status");
+      const output = document.getElementById("output");
+
+      function setStatus(message, type = "") {
+        status.className = type;
+        status.textContent = message;
+      }
+
+      function resetView() {
+        input.value = "";
+        setStatus("等待选择文件...");
+        output.textContent = "暂无结果";
+      }
+
+      function readUInt16(view, offset) {
+        return view.getUint16(offset, false);
+      }
+
+      function parseMidiHeader(buffer) {
+        if (buffer.byteLength < 14) {
+          throw new Error("文件过小，不是有效的 MIDI 文件。");
+        }
+        const bytes = new Uint8Array(buffer, 0, 4);
+        const magic = String.fromCharCode(...bytes);
+        if (magic !== "MThd") {
+          throw new Error("文件头不是 MThd，可能不是标准 MIDI 文件。");
+        }
+        const dv = new DataView(buffer);
+        const headerLength = dv.getUint32(4, false);
+        if (headerLength < 6 || buffer.byteLength < 8 + headerLength) {
+          throw new Error("MIDI 头长度异常，文件可能损坏。");
+        }
+        const format = readUInt16(dv, 8);
+        const tracks = readUInt16(dv, 10);
+        const division = readUInt16(dv, 12);
+        return { magic, headerLength, format, tracks, division };
+      }
+
+      async function handleFileChange(event) {
+        const file = event.target.files && event.target.files[0];
+        if (!file) {
+          setStatus("未选择文件。", "err");
+          output.textContent = "暂无结果";
+          return;
+        }
+
+        const lowerName = file.name.toLowerCase();
+        if (!lowerName.endsWith(".mid") && !lowerName.endsWith(".midi")) {
+          setStatus("请选择 .mid 或 .midi 文件。", "err");
+          output.textContent = `文件名: ${file.name}\n文件大小: ${file.size} bytes`;
+          return;
+        }
+
+        setStatus("读取中...");
+
+        try {
+          const buffer = await file.arrayBuffer();
+          const info = parseMidiHeader(buffer);
+          setStatus("✅ 文件已读取并通过基础校验。", "ok");
+          output.textContent = [
+            `文件名: ${file.name}`,
+            `文件大小: ${file.size} bytes`,
+            `文件头: ${info.magic}`,
+            `Header Length: ${info.headerLength}`,
+            `Format: ${info.format}`,
+            `Tracks: ${info.tracks}`,
+            `Division(TPQN): ${info.division}`,
+          ].join("\n");
+        } catch (error) {
+          setStatus("❌ 读取失败。", "err");
+          output.textContent = [
+            `文件名: ${file.name}`,
+            `文件大小: ${file.size} bytes`,
+            `错误信息: ${error instanceof Error ? error.message : String(error)}`,
+          ].join("\n");
+          console.error(error);
+        }
+      }
+
+      input.addEventListener("change", handleFileChange);
+      clearBtn.addEventListener("click", resetView);
+    </script>
+  </body>
+</html>
