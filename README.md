@@ -11,6 +11,7 @@
 - 支持全局速度倍率（0.5x ~ 2.0x）
 - 支持按轨道启用/静音，适配不同琴谱编排模式
 - 支持 SoundFont 高保真音色与更多乐器选择（MusyngKite / FluidR3 GM）
+- 提供多种合成器音色预设，可在轻量模式下快速切换
 
 ## 运行方式
 
@@ -30,7 +31,7 @@ http://localhost:8080
 
 - 解析与时序：使用 `@tonejs/midi`
 - 合成与调度：使用 `Tone.js`
-- SoundFont 音色：使用 `soundfont-player` 加载通用 GM 音色库
+- SoundFont 音色：使用 `soundfont-player` 加载通用 GM 音色库（CDN 加载失败会回退合成器）
 - 对复杂 MIDI 的支持策略：
   - 优先保证音符、速度、轨道/通道、基础节拍信息可播放
   - 对不同乐器族进行合成器映射，尽可能还原不同琴谱模式

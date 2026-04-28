@@ -1,6 +1,5 @@
 import * as Tone from "https://cdn.jsdelivr.net/npm/tone@15.1.22/+esm";
 import { Midi } from "https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/+esm";
-import Soundfont from "https://cdn.jsdelivr.net/npm/soundfont-player@0.12.0/+esm";
 
 const midiFileInput = document.getElementById("midiFile");
 const fileInfo = document.getElementById("fileInfo");
@@ -13,6 +12,7 @@ const trackList = document.getElementById("trackList");
 const tempoControl = document.getElementById("tempoControl");
 const tempoValue = document.getElementById("tempoValue");
 const engineSelect = document.getElementById("engineSelect");
+const synthPresetSelect = document.getElementById("synthPreset");
 const soundfontBankSelect = document.getElementById("soundfontBank");
 const soundfontInstrumentSelect = document.getElementById("soundfontInstrument");
 const soundfontStatus = document.getElementById("soundfontStatus");
@@ -20,8 +20,58 @@ const soundfontStatus = document.getElementById("soundfontStatus");
 const SCHEDULE_START_DELAY_SECONDS = 0.05;
 // 超过该阈值的“过去”音符将被丢弃，避免堆积到当前时间。
 const PAST_NOTE_DROP_SECONDS = 0.01;
+const SOUND_FONT_SCRIPT_URLS = [
+  "https://cdn.jsdelivr.net/npm/soundfont-player@0.12.0/dist/soundfont-player.min.js",
+  "https://unpkg.com/soundfont-player@0.12.0/dist/soundfont-player.min.js",
+];
+const DEFAULT_ENGINE = "soundfont";
 const SOUND_FONT_DEFAULT_BANK = "MusyngKite";
 const SOUND_FONT_DEFAULT_INSTRUMENT = "auto";
+const SYNTH_PRESETS = {
+  auto: {
+    label: "自动（按乐器族）",
+    familyTypeMap: {
+      piano: "triangle",
+      guitar: "square",
+      strings: "sine",
+      ensemble: "sine",
+      brass: "sawtooth",
+      reed: "sawtooth",
+      pipe: "sine",
+      synthlead: "square",
+      synthpad: "triangle",
+      ethnics: "triangle",
+    },
+    envelope: { attack: 0.005, decay: 0.2, sustain: 0.35, release: 0.8 },
+    monoEnvelope: { attack: 0.01, decay: 0.2, sustain: 0.35, release: 0.6 },
+    monoOscillator: "triangle",
+  },
+  bright: {
+    label: "明亮 Synth",
+    oscillator: "sawtooth",
+    envelope: { attack: 0.01, decay: 0.18, sustain: 0.5, release: 0.5 },
+  },
+  warm: {
+    label: "柔和 Pad",
+    oscillator: "sine",
+    envelope: { attack: 0.4, decay: 0.2, sustain: 0.7, release: 1.2 },
+  },
+  pluck: {
+    label: "拨弦 Pluck",
+    oscillator: "square",
+    envelope: { attack: 0.002, decay: 0.2, sustain: 0.1, release: 0.2 },
+  },
+  bell: {
+    label: "钟声 Bell",
+    oscillator: "sine",
+    envelope: { attack: 0.01, decay: 0.8, sustain: 0.1, release: 1.1 },
+  },
+  lead: {
+    label: "主音 Lead",
+    oscillator: "sawtooth",
+    envelope: { attack: 0.02, decay: 0.15, sustain: 0.6, release: 0.4 },
+  },
+};
 const GM_INSTRUMENTS = [
   "acoustic_grand_piano",
   "bright_acoustic_piano",
@@ -158,11 +208,15 @@ const state = {
   tracks: [],
   isPlaying: false,
   rafId: null,
-  engine: "synth",
+  engine: DEFAULT_ENGINE,
   soundfontBank: SOUND_FONT_DEFAULT_BANK,
   soundfontInstrument: SOUND_FONT_DEFAULT_INSTRUMENT,
+  synthPreset: "auto",
   loadToken: 0,
 };
+
+let soundfontModulePromise = null;
+let soundfontModule = null;
 
 function formatSoundfontLabel(name) {
   return name.replace(/_/g, " ");
@@ -170,6 +224,75 @@ function formatSoundfontLabel(name) {
 
 function setSoundfontStatus(message) {
   soundfontStatus.textContent = message;
+}
+
+function loadScript(url) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${url}"]`);
+    if (existing) {
+      if (window.Soundfont) {
+        resolve();
+      } else {
+        existing.addEventListener("load", () => resolve(), { once: true });
+        existing.addEventListener("error", () => reject(new Error(`SoundFont 脚本加载失败：${url}`)), {
+          once: true,
+        });
+      }
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = url;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`SoundFont 脚本加载失败：${url}`));
+    document.head.appendChild(script);
+  });
+}
+
+async function getSoundfontModule() {
+  if (soundfontModule) {
+    return soundfontModule;
+  }
+  if (!soundfontModulePromise) {
+    soundfontModulePromise = (async () => {
+      let lastError;
+      for (const url of SOUND_FONT_SCRIPT_URLS) {
+        try {
+          await loadScript(url);
+          if (window.Soundfont) {
+            return window.Soundfont;
+          }
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      throw lastError || new Error("SoundFont 脚本加载失败");
+    })();
+  }
+
+  try {
+    soundfontModule = await soundfontModulePromise;
+    return soundfontModule;
+  } catch (error) {
+    soundfontModulePromise = null;
+    throw error;
+  }
+}
+
+function populateSynthOptions() {
+  synthPresetSelect.innerHTML = "";
+  Object.entries(SYNTH_PRESETS).forEach(([value, preset]) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = preset.label;
+    synthPresetSelect.append(option);
+  });
+  synthPresetSelect.value = state.synthPreset;
+}
+
+function getSynthPresetConfig() {
+  return SYNTH_PRESETS[state.synthPreset] || SYNTH_PRESETS.auto;
 }
 
 function populateSoundfontOptions() {
@@ -189,13 +312,14 @@ function populateSoundfontOptions() {
   soundfontInstrumentSelect.value = state.soundfontInstrument;
 }
 
-function updateSoundfontControls() {
-  const enabled = state.engine === "soundfont";
-  soundfontBankSelect.disabled = !enabled;
-  soundfontInstrumentSelect.disabled = !enabled;
+function updateEngineControls() {
+  const soundfontEnabled = state.engine === "soundfont";
+  soundfontBankSelect.disabled = !soundfontEnabled;
+  soundfontInstrumentSelect.disabled = !soundfontEnabled;
+  synthPresetSelect.disabled = soundfontEnabled;
   setSoundfontStatus(
-    enabled
-      ? "SoundFont 模式已启用，加载音色可能需要几秒钟。"
+    soundfontEnabled
+      ? "SoundFont 模式已启用，可选择 128 个 GM 音色，加载可能需要几秒钟。"
       : "当前使用合成器音色，可切换至 SoundFont 获得更高保真。",
   );
 }
@@ -276,32 +400,26 @@ function createToneInstrument(track) {
   }
 
   const family = (track.instrument.family || "").toLowerCase();
+  const preset = getSynthPresetConfig();
   let synth;
   if (["bass"].includes(family)) {
     synth = new Tone.MonoSynth({
-      oscillator: { type: "triangle" },
-      envelope: { attack: 0.01, decay: 0.2, sustain: 0.35, release: 0.6 },
+      oscillator: { type: preset.monoOscillator || preset.oscillator || "triangle" },
+      envelope: preset.monoEnvelope || preset.envelope || { attack: 0.01, decay: 0.2, sustain: 0.35, release: 0.6 },
     }).toDestination();
   } else {
-    const familyTypeMap = {
-      piano: "triangle",
-      guitar: "square",
-      strings: "sine",
-      ensemble: "sine",
-      brass: "sawtooth",
-      reed: "sawtooth",
-      pipe: "sine",
-      synthlead: "square",
-      synthpad: "triangle",
-      ethnics: "triangle",
-    };
-
-    const oscillator = familyTypeMap[family] || "triangle";
+    const oscillator =
+      state.synthPreset === "auto"
+        ? preset.familyTypeMap?.[family] || "triangle"
+        : preset.oscillator || "triangle";
     synth = new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: oscillator },
-      envelope: { attack: 0.005, decay: 0.2, sustain: 0.35, release: 0.8 },
+      envelope: preset.envelope || { attack: 0.005, decay: 0.2, sustain: 0.35, release: 0.8 },
     }).toDestination();
   }
+
+  const presetLabel =
+    state.synthPreset === "auto" ? track.instrument.name : `Synth: ${preset.label || "Preset"}`;
 
   return {
     playNote: (time, note) => {
@@ -311,13 +429,17 @@ function createToneInstrument(track) {
       synth.volume.value = enabled ? 0 : -Infinity;
     },
     dispose: () => synth.dispose(),
-    instrumentLabel: track.instrument.name,
+    instrumentLabel: presetLabel,
   };
 }
 
-async function createSoundfontInstrument(track) {
+async function createSoundfontInstrument(track, soundfont) {
   if (track.instrument.percussion || track.channel === 9) {
     return createDrumInstrument();
+  }
+
+  if (!soundfont) {
+    return createToneInstrument(track);
   }
 
   const instrumentName = resolveSoundfontInstrument(track);
@@ -326,7 +448,7 @@ async function createSoundfontInstrument(track) {
   let lastError;
   for (const candidate of candidates) {
     try {
-      const player = await Soundfont.instrument(audioContext, candidate, {
+      const player = await soundfont.instrument(audioContext, candidate, {
         soundfont: state.soundfontBank,
         format: "mp3",
       });
@@ -434,12 +556,27 @@ async function preparePlayback(midi) {
     setSoundfontStatus("SoundFont 音色加载中，请稍候...");
   }
 
+  let soundfont = null;
+  if (state.engine === "soundfont") {
+    try {
+      soundfont = await getSoundfontModule();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "未知错误";
+      setSoundfontStatus(`SoundFont 加载失败，已切换合成器：${errorMessage}`);
+      state.engine = "synth";
+      engineSelect.value = state.engine;
+      updateEngineControls();
+    }
+  }
+
   const trackItems = await Promise.all(
     midi.tracks
       .filter((track) => track.notes.length > 0)
       .map(async (track) => {
         const instrument =
-          state.engine === "soundfont" ? await createSoundfontInstrument(track) : createToneInstrument(track);
+          state.engine === "soundfont"
+            ? await createSoundfontInstrument(track, soundfont)
+            : createToneInstrument(track);
 
         if (loadToken !== state.loadToken) {
           // 避免快速切换设置导致的异步加载泄漏。
@@ -534,7 +671,7 @@ midiFileInput.addEventListener("change", async (event) => {
 
 engineSelect.addEventListener("change", async () => {
   state.engine = engineSelect.value;
-  updateSoundfontControls();
+  updateEngineControls();
   await reloadPlaybackIfReady();
 });
 
@@ -545,6 +682,11 @@ soundfontBankSelect.addEventListener("change", async () => {
 
 soundfontInstrumentSelect.addEventListener("change", async () => {
   state.soundfontInstrument = soundfontInstrumentSelect.value;
+  await reloadPlaybackIfReady();
+});
+
+synthPresetSelect.addEventListener("change", async () => {
+  state.synthPreset = synthPresetSelect.value;
   await reloadPlaybackIfReady();
 });
 
@@ -597,6 +739,7 @@ tempoControl.addEventListener("input", () => {
 
 engineSelect.value = state.engine;
 soundfontBankSelect.value = state.soundfontBank;
+populateSynthOptions();
 populateSoundfontOptions();
-updateSoundfontControls();
+updateEngineControls();
 setControlsEnabled(false);
