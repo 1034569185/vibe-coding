@@ -20,6 +20,9 @@ const soundfontStatus = document.getElementById("soundfontStatus");
 const SCHEDULE_START_DELAY_SECONDS = 0.05;
 // 超过该阈值的“过去”音符将被丢弃，避免堆积到当前时间。
 const PAST_NOTE_DROP_SECONDS = 0.01;
+const MIN_NOTE_DURATION = 0.03;
+const MIN_NOTE_VELOCITY = 0.05;
+const MIN_DRUM_DURATION = 0.06;
 const SOUND_FONT_SCRIPT_URLS = [
   "https://cdn.jsdelivr.net/npm/soundfont-player@0.12.0/dist/soundfont-player.min.js",
   "https://unpkg.com/soundfont-player@0.12.0/dist/soundfont-player.min.js",
@@ -71,6 +74,9 @@ const SYNTH_PRESETS = {
     oscillator: "sawtooth",
     envelope: { attack: 0.02, decay: 0.15, sustain: 0.6, release: 0.4 },
   },
+};
+const SOUNDFONT_NAME_VARIANTS = {
+  lead_8_bass_lead: ["lead_8_bass_lead", "lead_8_bass__lead"],
 };
 const GM_INSTRUMENTS = [
   "acoustic_grand_piano",
@@ -325,11 +331,8 @@ function updateEngineControls() {
 }
 
 function getSoundfontNameCandidates(name) {
-  // 某些音色在 SoundFont 文件中将 “+” 表示为双下划线（例如 bass__lead）。
-  if (name === "lead_8_bass_lead") {
-    return ["lead_8_bass_lead", "lead_8_bass__lead"];
-  }
-  return [name];
+  // 某些音色在 SoundFont 文件中将 “+” 表示为双下划线（例如 lead_8_bass__lead）。
+  return SOUNDFONT_NAME_VARIANTS[name] || [name];
 }
 
 function resolveSoundfontInstrument(track) {
@@ -383,7 +386,7 @@ function createDrumInstrument() {
   return {
     playNote: (time, note) => {
       const drumFreq = Tone.Frequency(note.midi, "midi").toFrequency();
-      synth.triggerAttackRelease(drumFreq, Math.max(note.duration, 0.06), time, note.velocity);
+      synth.triggerAttackRelease(drumFreq, Math.max(note.duration, MIN_DRUM_DURATION), time, note.velocity);
     },
     setEnabled: (enabled) => {
       synth.volume.value = enabled ? 0 : -Infinity;
@@ -402,7 +405,7 @@ function createToneInstrument(track) {
   const family = (track.instrument.family || "").toLowerCase();
   const preset = getSynthPresetConfig();
   let synth;
-  if (["bass"].includes(family)) {
+  if (family === "bass") {
     synth = new Tone.MonoSynth({
       oscillator: { type: preset.monoOscillator || preset.oscillator || "triangle" },
       envelope: preset.monoEnvelope || preset.envelope || { attack: 0.01, decay: 0.2, sustain: 0.35, release: 0.6 },
@@ -423,7 +426,7 @@ function createToneInstrument(track) {
 
   return {
     playNote: (time, note) => {
-      synth.triggerAttackRelease(note.name, Math.max(note.duration, 0.03), time, note.velocity);
+      synth.triggerAttackRelease(note.name, Math.max(note.duration, MIN_NOTE_DURATION), time, note.velocity);
     },
     setEnabled: (enabled) => {
       synth.volume.value = enabled ? 0 : -Infinity;
@@ -455,14 +458,14 @@ async function createSoundfontInstrument(track, soundfont) {
 
       return {
         playNote: (time, note) => {
-          // Tone.Part 回调的 time 与 AudioContext 时间基准一致。
+          // Tone.Part 回调的 time 与 AudioContext 时间基准一致；丢弃过期音符并对齐到当前时间。
           if (time < audioContext.currentTime - PAST_NOTE_DROP_SECONDS) {
             return;
           }
           const scheduledTime = Math.max(audioContext.currentTime, time);
           player.play(note.midi, scheduledTime, {
-            duration: Math.max(note.duration, 0.03),
-            gain: Math.max(note.velocity, 0.05),
+            duration: Math.max(note.duration, MIN_NOTE_DURATION),
+            gain: Math.max(note.velocity, MIN_NOTE_VELOCITY),
           });
         },
         setEnabled: (enabled) => {
@@ -573,13 +576,16 @@ async function preparePlayback(midi) {
     midi.tracks
       .filter((track) => track.notes.length > 0)
       .map(async (track) => {
+        if (loadToken !== state.loadToken) {
+          return null;
+        }
         const instrument =
           state.engine === "soundfont"
             ? await createSoundfontInstrument(track, soundfont)
             : createToneInstrument(track);
 
         if (loadToken !== state.loadToken) {
-          // 避免快速切换设置导致的异步加载泄漏。
+          // 避免异步加载的旧音色在设置变更后仍被使用（防止竞态）。
           instrument.dispose?.();
           return null;
         }
