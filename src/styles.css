@@ -53,7 +53,8 @@ h2 {
 
 button,
 input[type="file"],
-input[type="range"] {
+input[type="range"],
+select {
   accent-color: var(--primary);
 }
 
@@ -64,6 +65,14 @@ button {
   border-radius: 8px;
   padding: 8px 14px;
   cursor: pointer;
+}
+
+select {
+  border: 1px solid var(--border);
+  background: #1f2634;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 10px;
 }
 
 button:disabled {
