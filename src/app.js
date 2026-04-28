@@ -16,7 +16,10 @@ const engineSelect = document.getElementById("engineSelect");
 const soundfontBankSelect = document.getElementById("soundfontBank");
 const soundfontInstrumentSelect = document.getElementById("soundfontInstrument");
 const soundfontStatus = document.getElementById("soundfontStatus");
+// 留出少量延迟，确保 Tone.Transport 在启动时完成调度。
 const SCHEDULE_START_DELAY_SECONDS = 0.05;
+// 超过该阈值的“过去”音符将被丢弃，避免堆积到当前时间。
+const PAST_NOTE_DROP_SECONDS = 0.01;
 const SOUND_FONT_DEFAULT_BANK = "MusyngKite";
 const SOUND_FONT_DEFAULT_INSTRUMENT = "auto";
 const GM_INSTRUMENTS = [
@@ -107,7 +110,7 @@ const GM_INSTRUMENTS = [
   "lead_5_charang",
   "lead_6_voice",
   "lead_7_fifths",
-  "lead_8_bass__lead",
+  "lead_8_bass_lead",
   "pad_1_new_age",
   "pad_2_warm",
   "pad_3_polysynth",
@@ -197,12 +200,25 @@ function updateSoundfontControls() {
   );
 }
 
+function getSoundfontNameCandidates(name) {
+  // 某些音色在 SoundFont 文件中将 “+” 表示为双下划线（例如 bass__lead）。
+  if (name === "lead_8_bass_lead") {
+    return ["lead_8_bass_lead", "lead_8_bass__lead"];
+  }
+  return [name];
+}
+
 function resolveSoundfontInstrument(track) {
   if (state.soundfontInstrument !== SOUND_FONT_DEFAULT_INSTRUMENT) {
     return state.soundfontInstrument;
   }
-  const program = Number.isFinite(track.instrument.number) ? track.instrument.number : 0;
-  return GM_INSTRUMENTS[program] || GM_INSTRUMENTS[0];
+  let program = track.instrument.number;
+  if (!Number.isFinite(program)) {
+    console.warn("SoundFont: 未识别到有效的乐器编号，已回退为 0。");
+    program = 0;
+  }
+  const safeIndex = Math.min(Math.max(program, 0), GM_INSTRUMENTS.length - 1);
+  return GM_INSTRUMENTS[safeIndex];
 }
 
 function toTimeLabel(seconds) {
@@ -306,32 +322,43 @@ async function createSoundfontInstrument(track) {
 
   const instrumentName = resolveSoundfontInstrument(track);
   const audioContext = Tone.getContext().rawContext;
-  try {
-    const player = await Soundfont.instrument(audioContext, instrumentName, {
-      soundfont: state.soundfontBank,
-      format: "mp3",
-    });
+  const candidates = getSoundfontNameCandidates(instrumentName);
+  let lastError;
+  for (const candidate of candidates) {
+    try {
+      const player = await Soundfont.instrument(audioContext, candidate, {
+        soundfont: state.soundfontBank,
+        format: "mp3",
+      });
 
-    return {
-      playNote: (time, note) => {
-        player.play(note.midi, time, {
-          duration: Math.max(note.duration, 0.03),
-          gain: Math.max(note.velocity, 0.05),
-        });
-      },
-      setEnabled: (enabled) => {
-        if (!enabled) {
-          player.stop();
-        }
-      },
-      dispose: () => player.stop(),
-      instrumentLabel: `SoundFont: ${formatSoundfontLabel(instrumentName)}`,
-    };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "未知错误";
-    setSoundfontStatus(`SoundFont 加载失败，已回退合成器：${errorMessage}`);
-    return createToneInstrument(track);
+      return {
+        playNote: (time, note) => {
+          // Tone.Part 回调的 time 与 AudioContext 时间基准一致。
+          if (time < audioContext.currentTime - PAST_NOTE_DROP_SECONDS) {
+            return;
+          }
+          const scheduledTime = Math.max(audioContext.currentTime, time);
+          player.play(note.midi, scheduledTime, {
+            duration: Math.max(note.duration, 0.03),
+            gain: Math.max(note.velocity, 0.05),
+          });
+        },
+        setEnabled: (enabled) => {
+          if (!enabled) {
+            player.stop();
+          }
+        },
+        dispose: () => player.stop(),
+        instrumentLabel: `SoundFont: ${formatSoundfontLabel(candidate)}`,
+      };
+    } catch (error) {
+      lastError = error;
+    }
   }
+
+  const errorMessage = lastError instanceof Error ? lastError.message : "未知错误";
+  setSoundfontStatus(`SoundFont 加载失败，已回退合成器：${errorMessage}`);
+  return createToneInstrument(track);
 }
 
 function renderTrackList() {
@@ -348,7 +375,12 @@ function renderTrackList() {
     const info = document.createElement("div");
     const name = item.track.name || `Track ${index + 1}`;
     const instrumentLabel = item.instrumentLabel || item.track.instrument.name;
-    info.innerHTML = `<strong>${name}</strong><br/><span>${item.track.notes.length} notes · ch ${item.track.channel + 1} · ${instrumentLabel}</span>`;
+    const title = document.createElement("strong");
+    title.textContent = name;
+    const lineBreak = document.createElement("br");
+    const meta = document.createElement("span");
+    meta.textContent = `${item.track.notes.length} notes · ch ${item.track.channel + 1} · ${instrumentLabel}`;
+    info.append(title, lineBreak, meta);
 
     const label = document.createElement("label");
     label.className = "inline";
@@ -390,7 +422,8 @@ function updateTimeline() {
 async function preparePlayback(midi) {
   clearPlaybackGraph();
   state.midi = midi;
-  const loadToken = (state.loadToken += 1);
+  state.loadToken += 1;
+  const loadToken = state.loadToken;
 
   Tone.Transport.PPQ = midi.header.ppq || 480;
   Tone.Transport.timeSignature = midi.header.timeSignatures?.[0]?.timeSignature || [4, 4];
@@ -409,6 +442,8 @@ async function preparePlayback(midi) {
           state.engine === "soundfont" ? await createSoundfontInstrument(track) : createToneInstrument(track);
 
         if (loadToken !== state.loadToken) {
+          // 避免快速切换设置导致的异步加载泄漏。
+          instrument.dispose?.();
           return null;
         }
 
